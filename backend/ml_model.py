@@ -124,7 +124,7 @@ class BugPredictor:
             # Step 4 — inference
             with torch.no_grad():
                 logit       = self.model(tensor).squeeze()            # raw score
-                probability = torch.sigmoid(logit).item()     x        # 0 → 1 
+                probability = torch.sigmoid(logit).item()          # 0 → 1 
 
             results.append({
                 "file":            file_path,
