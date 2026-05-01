@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>BugRadar AI</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#07080b;--s1:#0d1017;--s2:#12151d;--s3:#181c27;--s4:#1d2235;
+  --border:#1e2332;--border2:#252c40;
+  --text:#dde2f0;--muted:#5a6480;--dim:#2e3450;
+  --cyan:#00d4ff;--red:#ff3b5c;--amber:#ffaa00;--green:#00e090;--purple:#a78bfa;
+  --mono:'IBM Plex Mono',monospace;--sans:'Sora',sans-serif;
+}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;overflow-x:hidden}
+#root{min-height:100vh}
+::-webkit-scrollbar{width:3px;height:3px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes countUp{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}
+@keyframes slideIn{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:translateX(0)}}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+@keyframes glow{0%,100%{box-shadow:0 0 20px var(--cyan)22}50%{box-shadow:0 0 40px var(--cyan)44}}
+.fade-up{animation:fadeUp .45s ease both}
+.fade-up-1{animation:fadeUp .45s .08s ease both}
+.fade-up-2{animation:fadeUp .45s .16s ease both}
+.fade-up-3{animation:fadeUp .45s .24s ease both}
+.count-anim{animation:countUp .5s cubic-bezier(.34,1.56,.64,1) both}
+pre{white-space:pre-wrap;word-break:break-word;font-family:var(--mono);font-size:12px;line-height:1.75}
+button{cursor:pointer;font-family:var(--sans)}
+input,textarea{font-family:var(--sans)}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+const API = "http://127.0.0.1:8000";
+
+/* ══════════════════════════════════════════════════════════════════
+   UTILITIES
+══════════════════════════════════════════════════════════════════ */
+const riskColor = p => p>=60?'var(--red)':p>=30?'var(--amber)':'var(--green)';
+const riskHex   = p => p>=60?'#ff3b5c':p>=30?'#ffaa00':'#00e090';
+const riskLabel = p => p>=60?'HIGH':p>=30?'MED':'LOW';
+const shortName = f => { const p=f.split('/'); return p[p.length-1]||f; };
+
+/* Token helpers — store JWT in localStorage */
+const storeToken  = t  => localStorage.setItem('bugradar_token', t);
+const loadToken   = () => localStorage.getItem('bugradar_token');
+const clearToken  = () => localStorage.removeItem('bugradar_token');
+
+/* Authenticated fetch — automatically adds Authorization header */
+const authFetch = (url, opts={}) => {
+  const token = loadToken();
+  return fetch(url, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(opts.headers||{}),
+    },
+  });
+};
+
+/* ══════════════════════════════════════════════════════════════════
+   SMALL SHARED COMPONENTS
+══════════════════════════════════════════════════════════════════ */
+const Spinner = ({size=18,color='var(--cyan)'}) => (
+  <div style={{width:size,height:size,border:`2px solid var(--border2)`,borderTopColor:color,borderRadius:'50%',animation:'spin .65s linear infinite',flexShrink:0}}/>
+);
+
+const Tag = ({children,color='cyan'}) => {
+  const c={cyan:'var(--cyan)',red:'var(--red)',amber:'var(--amber)',green:'var(--green)',purple:'var(--purple)'}[color];
+  return <span style={{fontFamily:'var(--mono)',fontSize:10,color:c,background:`${c}1a`,border:`1px solid ${c}35`,padding:'2px 8px',borderRadius:3,letterSpacing:'.08em',whiteSpace:'nowrap'}}>{children}</span>;
+};
+
+/* Form input with label */
+const Field = ({label, type='text', value, onChange, placeholder, error, icon}) => {
+  const [focused, setFocused] = useState(false);
+  return (
+    <div style={{marginBottom:16}}>
+      <label style={{display:'block',fontFamily:'var(--mono)',fontSize:10,color:'var(--muted)',letterSpacing:'.1em',textTransform:'uppercase',marginBottom:7}}>{label}</label>
+      <div style={{position:'relative'}}>
+        {icon && <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',fontSize:15,opacity:.4}}>{icon}</span>}
+        <input
+          type={type} value={value} onChange={onChange} placeholder={placeholder}
+          onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)}
+          style={{
+            width:'100%',background:'var(--s2)',
+            border:`1px solid ${error?'var(--red)':focused?'var(--cyan)':'var(--border2)'}`,
+            borderRadius:8,padding:`11px 14px 11px ${icon?'38px':'14px'}`,
+            color:'var(--text)',fontSize:13,outline:'none',transition:'border .18s',
+          }}
+        />
+      </div>
+      {error && <div style={{marginTop:5,fontSize:11,color:'var(--red)',fontFamily:'var(--mono)'}}>{error}</div>}
+    </div>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════
+   AUTH PAGE — Login / Signup
+══════════════════════════════════════════════════════════════════ */
+const AuthPage = ({ onAuth }) => {
+  const [mode, setMode]       = useState('login');   // 'login' | 'signup'
+  const [name, setName]       = useState('');
+  const [email, setEmail]     = useState('');
+  const [pass, setPass]       = useState('');
+  const [pass2, setPass2]     = useState('');
+  const [loading, setLoading] = useState(false);
+  const [errors, setErrors]   = useState({});
+  const [serverErr, setServerErr] = useState('');
+
+  const validate = () => {
+    const e = {};
+    if (mode==='signup' && !name.trim()) e.name = 'Name is required';
+    if (!email.includes('@'))           e.email = 'Enter a valid email';
+    if (pass.length < 6)                e.pass  = 'At least 6 characters';
+    if (mode==='signup' && pass !== pass2) e.pass2 = 'Passwords do not match';
+    return e;
+  };
+
+  const submit = async () => {
+    setServerErr('');
+    const e = validate();
+    if (Object.keys(e).length) { setErrors(e); return; }
+    setErrors({});
+    setLoading(true);
+    try {
+      const endpoint = mode === 'login' ? '/auth/login' : '/auth/signup';
+      const body     = mode === 'login'
+        ? { email, password: pass }
+        : { email, name, password: pass };
+
+      const res  = await fetch(`${API}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setServerErr(data.detail || 'Something went wrong.');
+      } else {
+        storeToken(data.token);
+        onAuth(data.user);
+      }
+    } catch {
+      setServerErr('Cannot reach the server. Make sure the backend is running.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const switchMode = () => {
+    setMode(m => m==='login'?'signup':'login');
+    setErrors({}); setServerErr('');
+    setName(''); setEmail(''); setPass(''); setPass2('');
+  };
+
+  return (
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:20,position:'relative',overflow:'hidden'}}>
+
+      {/* Background decoration */}
+      <div style={{position:'absolute',inset:0,overflow:'hidden',pointerEvents:'none'}}>
+        <div style={{position:'absolute',top:'15%',left:'8%',width:320,height:320,borderRadius:'50%',background:'radial-gradient(circle, var(--cyan)06 0%, transparent 70%)'}}/>
+        <div style={{position:'absolute',bottom:'20%',right:'10%',width:280,height:280,borderRadius:'50%',background:'radial-gradient(circle, var(--purple)08 0%, transparent 70%)'}}/>
+        {/* Grid lines */}
+        <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',opacity:.04}} xmlns="http://www.w3.org/2000/svg">
+          <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="var(--cyan)" strokeWidth="0.5"/></pattern></defs>
+          <rect width="100%" height="100%" fill="url(#grid)"/>
+        </svg>
+      </div>
+
+      <div style={{width:'100%',maxWidth:440,position:'relative',zIndex:1}}>
+
+        {/* Logo */}
+        <div className="fade-up" style={{textAlign:'center',marginBottom:36}}>
+          <div style={{display:'inline-flex',alignItems:'center',gap:10,marginBottom:12}}>
+            <div style={{width:9,height:9,borderRadius:'50%',background:'var(--cyan)',boxShadow:'0 0 12px var(--cyan)',animation:'pulse 2s ease-in-out infinite'}}/>
+            <span style={{fontFamily:'var(--mono)',fontWeight:600,fontSize:20,letterSpacing:'.06em'}}>BugRadar<span style={{color:'var(--cyan)'}}>.</span>AI</span>
+          </div>
+          <p style={{fontSize:13,color:'var(--muted)',lineHeight:1.7}}>AI-powered Python bug detection using CodeBERT + LangGraph</p>
+        </div>
+
+        {/* Card */}
+        <div className="fade-up-1" style={{background:'var(--s1)',border:'1px solid var(--border2)',borderRadius:16,padding:'32px 28px',boxShadow:'0 24px 60px rgba(0,0,0,.5)'}}>
+
+          {/* Tab switcher */}
+          <div style={{display:'flex',background:'var(--s2)',borderRadius:8,padding:3,marginBottom:28,border:'1px solid var(--border)'}}>
+            {['login','signup'].map(m=>(
+              <button key={m} onClick={()=>{ setMode(m); setErrors({}); setServerErr(''); }}
+                style={{flex:1,padding:'8px',borderRadius:6,border:'none',
+                  background:mode===m?'var(--s4)':'transparent',
+                  color:mode===m?'var(--text)':'var(--muted)',
+                  fontFamily:'var(--mono)',fontSize:11,fontWeight:mode===m?500:400,
+                  letterSpacing:'.08em',textTransform:'uppercase',transition:'all .18s'}}>
+                {m==='login'?'Sign In':'Create Account'}
+              </button>
+            ))}
+          </div>
+
+          {/* Title */}
+          <div style={{marginBottom:22}}>
+            <h2 style={{fontSize:18,fontWeight:600,marginBottom:4}}>{mode==='login'?'Welcome back':'Create your account'}</h2>
+            <p style={{fontSize:12,color:'var(--muted)'}}>{mode==='login'?'Sign in to continue to BugRadar AI':'Start detecting bugs in your Python repos'}</p>
+          </div>
+
+          {/* Server error */}
+          {serverErr && (
+            <div style={{marginBottom:16,padding:'10px 13px',background:'var(--red)0f',border:'1px solid var(--red)30',borderRadius:7,color:'var(--red)',fontSize:12,fontFamily:'var(--mono)',display:'flex',alignItems:'center',gap:8}}>
+              <span>⚠</span>{serverErr}
+            </div>
+          )}
+
+          {/* Fields */}
+          {mode==='signup' && (
+            <Field label="Full Name" value={name} onChange={e=>setName(e.target.value)}
+              placeholder="Ada Lovelace" error={errors.name} icon="👤"/>
+          )}
+          <Field label="Email Address" type="email" value={email} onChange={e=>setEmail(e.target.value)}
+            placeholder="you@example.com" error={errors.email} icon="✉"/>
+          <Field label="Password" type="password" value={pass} onChange={e=>setPass(e.target.value)}
+            placeholder="Min. 6 characters" error={errors.pass} icon="🔒"/>
+          {mode==='signup' && (
+            <Field label="Confirm Password" type="password" value={pass2} onChange={e=>setPass2(e.target.value)}
+              placeholder="Repeat password" error={errors.pass2} icon="🔒"/>
+          )}
+
+          {/* Submit */}
+          <button onClick={submit} disabled={loading}
+            style={{width:'100%',marginTop:4,padding:'13px',borderRadius:8,border:'none',
+              background:loading?'var(--s3)':'var(--cyan)',color:loading?'var(--muted)':'#000',
+              fontFamily:'var(--mono)',fontWeight:600,fontSize:12,letterSpacing:'.08em',
+              display:'flex',alignItems:'center',justifyContent:'center',gap:8,transition:'all .18s'}}>
+            {loading ? <><Spinner size={14} color="#666"/><span>PLEASE WAIT…</span></>
+              : mode==='login' ? '→  SIGN IN' : '→  CREATE ACCOUNT'}
+          </button>
+
+          {/* Divider + switch */}
+          <div style={{marginTop:22,textAlign:'center'}}>
+            <span style={{fontSize:12,color:'var(--muted)'}}>
+              {mode==='login'?'Don\'t have an account? ':'Already have an account? '}
+            </span>
+            <button onClick={switchMode}
+              style={{background:'none',border:'none',color:'var(--cyan)',fontSize:12,fontFamily:'var(--mono)',fontWeight:500,padding:0}}>
+              {mode==='login'?'Sign up':'Sign in'}
+            </button>
+          </div>
+        </div>
+
+        {/* Tech stack badges */}
+        <div className="fade-up-2" style={{marginTop:20,display:'flex',justifyContent:'center',gap:6,flexWrap:'wrap'}}>
+          <Tag>CodeBERT</Tag><Tag>PyTorch</Tag><Tag color="purple">LangGraph</Tag><Tag color="green">FastAPI</Tag>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════
+   DASHBOARD CHARTS
+══════════════════════════════════════════════════════════════════ */
+const Counter = ({target,color}) => {
+  const [v,setV]=useState(0);
+  useEffect(()=>{
+    let cur=0; const step=Math.max(1,Math.ceil(target/35));
+    const t=setInterval(()=>{cur+=step;if(cur>=target){setV(target);clearInterval(t);}else setV(cur);},28);
+    return ()=>clearInterval(t);
+  },[target]);
+  return <span style={{fontFamily:'var(--mono)',fontSize:32,fontWeight:600,color,lineHeight:1}}>{v}</span>;
+};
+
+const StatCard = ({label,value,color,sub,isStr=false,delay=0,icon}) => (
+  <div className="count-anim" style={{animationDelay:`${delay}s`,background:'var(--s1)',border:'1px solid var(--border)',borderRadius:10,padding:'16px 18px',position:'relative',overflow:'hidden',flex:1,minWidth:130}}>
+    <div style={{position:'absolute',top:0,left:0,right:0,height:2,background:color}}/>
+    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+      <div style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--muted)',letterSpacing:'.12em',textTransform:'uppercase'}}>{label}</div>
+      {icon&&<span style={{fontSize:16,opacity:.5}}>{icon}</span>}
+    </div>
+    {isStr?<div style={{fontFamily:'var(--mono)',fontSize:32,fontWeight:600,color,lineHeight:1}}>{value}</div>
+          :<Counter target={typeof value==='number'?value:0} color={color}/>}
+    <div style={{fontSize:11,color:'var(--muted)',marginTop:8}}>{sub}</div>
+  </div>
+);
+
+const Donut = ({high,mid,low,total}) => {
+  const R=52,cx=75,cy=75,circ=2*Math.PI*R;
+  const segs=[{v:high,c:'#ff3b5c',l:'High Risk'},{v:mid,c:'#ffaa00',l:'Medium Risk'},{v:low,c:'#00e090',l:'Low Risk'}];
+  let off=0;
+  const arcs=segs.map(s=>{const len=total>0?(s.v/total)*circ:0;const a={...s,len,off};off+=len;return a;});
+  const pct=v=>total>0?((v/total)*100).toFixed(0)+'%':'—';
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:24,flexWrap:'wrap'}}>
+      <svg width={150} height={150} viewBox="0 0 150 150" style={{flexShrink:0}}>
+        <circle cx={cx} cy={cy} r={R} fill="none" stroke="var(--s3)" strokeWidth={13}/>
+        {arcs.map((a,i)=>a.len>0&&(
+          <circle key={i} cx={cx} cy={cy} r={R} fill="none" stroke={a.c} strokeWidth={13} strokeLinecap="round"
+            strokeDasharray={`${a.len} ${circ-a.len}`} strokeDashoffset={-a.off}
+            style={{transform:'rotate(-90deg)',transformOrigin:`${cx}px ${cy}px`}}>
+            <animate attributeName="stroke-dasharray" from={`0 ${circ}`} to={`${a.len} ${circ-a.len}`} dur=".9s" begin={`${i*0.2}s`} fill="freeze"/>
+          </circle>
+        ))}
+        <text x={cx} y={cy-8} textAnchor="middle" fill="var(--text)" fontSize={24} fontWeight={600} fontFamily="var(--mono)">{total}</text>
+        <text x={cx} y={cy+10} textAnchor="middle" fill="var(--muted)" fontSize={9} fontFamily="var(--mono)" letterSpacing=".1em">FILES</text>
+      </svg>
+      <div style={{flex:1,minWidth:140}}>
+        {arcs.map(a=>(
+          <div key={a.l} style={{marginBottom:12}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+              <div style={{display:'flex',alignItems:'center',gap:6}}>
+                <div style={{width:8,height:8,borderRadius:2,background:a.c}}/>
+                <span style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--muted)'}}>{a.l}</span>
+              </div>
+              <div style={{display:'flex',gap:8}}>
+                <span style={{fontFamily:'var(--mono)',fontSize:12,fontWeight:600,color:'var(--text)'}}>{a.v}</span>
+                <span style={{fontFamily:'var(--mono)',fontSize:10,color:a.c}}>{pct(a.v)}</span>
+              </div>
+            </div>
+            <div style={{height:3,background:'var(--s3)',borderRadius:2,overflow:'hidden'}}>
+              <div style={{height:'100%',background:a.c,borderRadius:2,transition:'width .8s ease',width:total>0?`${(a.v/total)*100}%`:'0%'}}/>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const HBarChart = ({predictions}) => {
+  const top=predictions.slice(0,15);
+  const W=520,ROW=24,PAD=5,LABEL=155,BAR_MAX=W-LABEL-68,H=top.length*(ROW+PAD)+16;
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{overflow:'visible'}}>
+      {[25,50,75,100].map(g=>(
+        <g key={g}>
+          <line x1={LABEL+BAR_MAX*(g/100)} y1={0} x2={LABEL+BAR_MAX*(g/100)} y2={H} stroke="var(--s4)" strokeWidth={1}/>
+          <text x={LABEL+BAR_MAX*(g/100)} y={H+12} textAnchor="middle" fontFamily="var(--mono)" fontSize={8} fill="var(--dim)">{g}%</text>
+        </g>
+      ))}
+      <line x1={LABEL+BAR_MAX*0.6} y1={0} x2={LABEL+BAR_MAX*0.6} y2={H} stroke="#ff3b5c" strokeWidth={1} strokeDasharray="3 3" opacity={.5}/>
+      {top.map((p,i)=>{
+        const y=i*(ROW+PAD),barW=Math.max(2,(p.bug_probability/100)*BAR_MAX),col=riskHex(p.bug_probability);
+        const sn=shortName(p.file); const label=sn.length>24?sn.slice(0,22)+'…':sn;
+        return (
+          <g key={p.file}>
+            <text x={LABEL-6} y={y+ROW/2+1} textAnchor="end" dominantBaseline="middle" fontFamily="var(--mono)" fontSize={9.5} fill="var(--muted)">{label}</text>
+            <rect x={LABEL} y={y+4} width={BAR_MAX} height={ROW-8} rx={3} fill="var(--s3)"/>
+            <rect x={LABEL} y={y+4} width={barW} height={ROW-8} rx={3} fill={col} opacity={.82}>
+              <animate attributeName="width" from="0" to={barW} dur=".65s" begin={`${i*0.035}s`} fill="freeze"/>
+            </rect>
+            <text x={LABEL+barW+5} y={y+ROW/2+1} dominantBaseline="middle" fontFamily="var(--mono)" fontSize={9.5} fontWeight={500} fill={col}>{p.bug_probability.toFixed(1)}%</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
+const ScatterChart = ({predictions}) => {
+  const W=480,H=220,PL=44,PR=16,PT=12,PB=32,IW=W-PL-PR,IH=H-PT-PB;
+  const maxLOC=Math.max(...predictions.map(p=>p.loc||0),100);
+  const pts=predictions.map(p=>({x:PL+((p.loc||0)/maxLOC)*IW,y:PT+IH-(p.bug_probability/100)*IH,col:riskHex(p.bug_probability),file:shortName(p.file),prob:p.bug_probability,loc:p.loc||0}));
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{overflow:'visible'}}>
+      <line x1={PL} y1={PT} x2={PL} y2={PT+IH} stroke="var(--border2)" strokeWidth={1}/>
+      <line x1={PL} y1={PT+IH} x2={PL+IW} y2={PT+IH} stroke="var(--border2)" strokeWidth={1}/>
+      {[0,25,50,75,100].map(t=>{const y=PT+IH-(t/100)*IH;return<g key={t}><line x1={PL} y1={y} x2={PL+IW} y2={y} stroke="var(--s4)" strokeWidth={1}/><text x={PL-4} y={y+1} textAnchor="end" dominantBaseline="middle" fontFamily="var(--mono)" fontSize={8} fill="var(--dim)">{t}%</text></g>;})}
+      {[0,.25,.5,.75,1].map(t=><text key={t} x={PL+t*IW} y={PT+IH+12} textAnchor="middle" fontFamily="var(--mono)" fontSize={8} fill="var(--dim)">{Math.round(t*maxLOC)}</text>)}
+      <line x1={PL} y1={PT+IH*0.4} x2={PL+IW} y2={PT+IH*0.4} stroke="#ff3b5c" strokeWidth={1} strokeDasharray="4 3" opacity={.4}/>
+      {pts.map((p,i)=><g key={i}><circle cx={p.x} cy={p.y} r={5} fill={p.col} opacity={.75} stroke="var(--bg)" strokeWidth={1}><animate attributeName="r" from="0" to="5" dur=".4s" begin={`${i*0.02}s`} fill="freeze"/></circle><title>{p.file} — {p.prob.toFixed(1)}% · {p.loc} LOC</title></g>)}
+      <text x={PL+IW/2} y={H-2} textAnchor="middle" fontFamily="var(--mono)" fontSize={8} fill="var(--muted)">Lines of Code</text>
+      <text x={8} y={PT+IH/2} textAnchor="middle" fontFamily="var(--mono)" fontSize={8} fill="var(--muted)" transform={`rotate(-90,8,${PT+IH/2})`}>Bug %</text>
+    </svg>
+  );
+};
+
+const HeatMap = ({predictions}) => {
+  const buckets={};
+  predictions.forEach(p=>{const parts=p.file.split('/');const dir=parts.length>1?parts.slice(0,parts.length-1).join('/'):'root';const sd=dir.length>20?'…/'+dir.slice(-16):dir;if(!buckets[sd])buckets[sd]={files:[],total:0};buckets[sd].files.push(p);buckets[sd].total+=p.bug_probability;});
+  const rows=Object.entries(buckets).map(([dir,d])=>({dir,count:d.files.length,avg:d.total/d.files.length,high:d.files.filter(f=>f.bug_probability>=60).length})).sort((a,b)=>b.avg-a.avg).slice(0,10);
+  if(!rows.length) return <div style={{color:'var(--muted)',fontFamily:'var(--mono)',fontSize:11,padding:20,textAlign:'center'}}>Not enough data</div>;
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:6}}>
+      {rows.map((r,i)=>{const col=r.avg>=60?'#ff3b5c':r.avg>=30?'#ffaa00':'#00e090';const heat=r.avg/Math.max(...rows.map(x=>x.avg),1);return(
+        <div key={r.dir} style={{display:'flex',alignItems:'center',gap:10,padding:'7px 10px',borderRadius:6,background:`rgba(${r.avg>=60?'255,59,92':r.avg>=30?'255,170,0':'0,224,144'},${0.06+heat*0.22})`,border:`1px solid ${col}25`}}>
+          <span style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--dim)',minWidth:14}}>#{i+1}</span>
+          <span style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--text)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.dir}</span>
+          <span style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--muted)',minWidth:50,textAlign:'right'}}>{r.count} file{r.count!==1?'s':''}</span>
+          <div style={{width:80,height:6,background:'var(--s3)',borderRadius:3,overflow:'hidden',flexShrink:0}}><div style={{width:`${Math.min(r.avg,100)}%`,height:'100%',background:col,borderRadius:3}}/></div>
+          <span style={{fontFamily:'var(--mono)',fontSize:10,color:col,fontWeight:600,minWidth:38,textAlign:'right'}}>{r.avg.toFixed(0)}%</span>
+          {r.high>0&&<span style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--red)',background:'var(--red)18',border:'1px solid var(--red)28',padding:'1px 5px',borderRadius:3}}>{r.high}🔴</span>}
+        </div>
+      );})}
+    </div>
+  );
+};
+
+const FileRow = ({file,prob,loc,selected,onClick}) => {
+  const col=riskColor(prob);
+  return(
+    <div onClick={onClick} style={{padding:'8px 14px',borderBottom:'1px solid var(--border)',cursor:'pointer',background:selected?'var(--s3)':'transparent',transition:'background .12s',display:'flex',alignItems:'center',gap:10}}>
+      <div style={{width:3,height:30,borderRadius:2,background:col,flexShrink:0}}/>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+          <span style={{fontFamily:'var(--mono)',fontSize:11,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'75%'}}>{file}</span>
+          <span style={{fontFamily:'var(--mono)',fontSize:11,color:col,fontWeight:600,flexShrink:0,marginLeft:8}}>{prob.toFixed(1)}%</span>
+        </div>
+        <div style={{height:3,background:'var(--s3)',borderRadius:2,overflow:'hidden'}}>
+          <div style={{height:'100%',width:`${Math.min(prob,100)}%`,background:col,borderRadius:2,transition:'width .7s ease'}}/>
+        </div>
+        {loc&&<div style={{marginTop:3,fontSize:9,color:'var(--dim)',fontFamily:'var(--mono)'}}>{loc} lines</div>}
+      </div>
+      <span style={{fontFamily:'var(--mono)',fontSize:9,color:col,background:`${col}18`,border:`1px solid ${col}28`,padding:'2px 6px',borderRadius:3,flexShrink:0}}>{riskLabel(prob)}</span>
+    </div>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════
+   REVIEW MODAL
+══════════════════════════════════════════════════════════════════ */
+const ReviewModal = ({file,code,prob,onClose}) => {
+  const [loading,setLoading]=useState(false);
+  const [result,setResult]=useState(null);
+  const [error,setError]=useState('');
+  const [tab,setTab]=useState('critique');
+  const run=async()=>{
+    setLoading(true);setError('');setResult(null);
+    try{
+      const r=await authFetch(`${API}/review`,{method:'POST',body:JSON.stringify({file_name:file,code_snippet:code,bug_probability:prob})});
+      if(!r.ok){const d=await r.json();throw new Error(d.detail||`Error ${r.status}`);}
+      const d=await r.json();
+      if(d.status==='success')setResult(d.analysis);else throw new Error(d.detail||'Error');
+    }catch(e){setError(e.message);}
+    finally{setLoading(false);}
+  };
+  const TABS=[{k:'critique',l:'Issues'},{k:'fixed_code',l:'Fixed Code'},{k:'test_suggestions',l:'Tests'},{k:'bug_summary',l:'Hypothesis'}];
+  const col=riskColor(prob);
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.85)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+      <div style={{background:'var(--s1)',border:'1px solid var(--border2)',borderRadius:12,width:'100%',maxWidth:820,maxHeight:'88vh',display:'flex',flexDirection:'column',overflow:'hidden',animation:'fadeUp .25s ease'}}>
+        <div style={{padding:'13px 18px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <div style={{width:6,height:6,borderRadius:'50%',background:col}}/>
+            <span style={{fontFamily:'var(--mono)',fontSize:12,color:'var(--text)'}}>{file}</span>
+            <Tag color={prob>=60?'red':prob>=30?'amber':'green'}>{riskLabel(prob)} · {prob.toFixed(1)}%</Tag>
+          </div>
+          <button onClick={onClose} style={{background:'none',border:'none',color:'var(--muted)',fontSize:18,lineHeight:1,padding:'2px 6px'}}>✕</button>
+        </div>
+        <div style={{flex:1,overflow:'auto',padding:18}}>
+          {!result&&!loading&&(
+            <div style={{textAlign:'center',padding:'36px 20px'}}>
+              <div style={{marginBottom:18,display:'flex',flexWrap:'wrap',gap:6,justifyContent:'center'}}>
+                {['1. Hypothesis','2. Critique','3. Fix','4. Tests'].map(s=>(
+                  <span key={s} style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--cyan)',background:'var(--cyan)15',border:'1px solid var(--cyan)28',padding:'4px 10px',borderRadius:4}}>{s}</span>
+                ))}
+              </div>
+              <div style={{fontSize:13,color:'var(--muted)',marginBottom:20,lineHeight:1.8}}>4-step LangGraph agent: <strong style={{color:'var(--text)'}}>Hypothesis → Critique → Fix → Tests</strong></div>
+              <button onClick={run} style={{background:'var(--cyan)',color:'#000',fontFamily:'var(--mono)',fontWeight:600,fontSize:12,border:'none',borderRadius:6,padding:'10px 28px',letterSpacing:'.06em'}}>RUN AI REVIEW</button>
+            </div>
+          )}
+          {loading&&(
+            <div style={{textAlign:'center',padding:'44px 20px'}}>
+              <Spinner size={24}/><div style={{marginTop:14,fontSize:12,color:'var(--muted)',fontFamily:'var(--mono)',marginBottom:12}}>LangGraph agent running…</div>
+              {['Forming bug hypothesis…','Critiquing code line by line…','Generating fixed code…','Writing unit tests…'].map((s,i)=>(
+                <div key={i} style={{fontSize:11,color:'var(--dim)',fontFamily:'var(--mono)',marginTop:6,animation:`pulse 1.6s ${i*.35}s ease-in-out infinite`}}>{s}</div>
+              ))}
+            </div>
+          )}
+          {error&&<div style={{color:'var(--red)',fontFamily:'var(--mono)',fontSize:12,padding:14,background:'var(--red)0d',borderRadius:8,border:'1px solid var(--red)25'}}>{error}</div>}
+          {result&&(
+            <div>
+              <div style={{display:'flex',gap:4,marginBottom:14,borderBottom:'1px solid var(--border)',paddingBottom:10,flexWrap:'wrap'}}>
+                {TABS.map(t=>(
+                  <button key={t.k} onClick={()=>setTab(t.k)} style={{fontFamily:'var(--mono)',fontSize:11,padding:'5px 12px',borderRadius:4,border:`1px solid ${tab===t.k?'var(--cyan)':'var(--border)'}`,background:tab===t.k?'var(--cyan)18':'transparent',color:tab===t.k?'var(--cyan)':'var(--muted)',transition:'all .12s'}}>{t.l}</button>
+                ))}
+              </div>
+              <div style={{background:'var(--s2)',borderRadius:8,padding:14,border:'1px solid var(--border)'}}>
+                <pre style={{color:tab==='test_suggestions'?'var(--green)':tab==='fixed_code'?'var(--cyan)':'var(--text)'}}>{result[tab]||'—'}</pre>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════
+   AI CHAT SIDEBAR
+══════════════════════════════════════════════════════════════════ */
+const ChatSidebar = ({repoData,onClose}) => {
+  const [msgs,setMsgs]=useState([{role:'ai',text:"👋 I'm your BugRadar AI assistant.\n\nScan a repo and I can answer:\n• Which file is riskiest?\n• What should I fix first?\n• How many high-risk files?"}]);
+  const [input,setInput]=useState('');
+  const [loading,setLoading]=useState(false);
+  const bottomRef=useRef(null);
+  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:'smooth'});},[msgs,loading]);
+  const preds=repoData?.predictions?[...repoData.predictions].sort((a,b)=>b.bug_probability-a.bug_probability):[];
+  const high=preds.filter(p=>p.bug_probability>=60),mid=preds.filter(p=>p.bug_probability>=30&&p.bug_probability<60),low=preds.filter(p=>p.bug_probability<30);
+  const qa=preds.length?['Which file has the highest risk?','Show top 5 risky files','How many high risk files?','What should I fix first?','Summarize the repo health']:['What does this tool do?','How does CodeBERT work?','What is LangGraph?'];
+  const answer=q=>{
+    const ql=q.toLowerCase();
+    if(!repoData){if(ql.includes('codebert'))return'CodeBERT is Microsoft\'s code-pretrained RoBERTa model. It turns each Python file into a 768-dim vector capturing code semantics — far richer than keyword matching.';if(ql.includes('langgraph'))return'LangGraph builds multi-step AI agents. BugRadar uses it for 4 sequential steps:\n1. Bug Hypothesis\n2. Line-level Critique\n3. Fixed Code\n4. Unit Tests';return'Paste a GitHub URL and click Scan to load repo data!';}
+    if(ql.includes('highest')||ql.includes('riskiest'))return`🔴 Riskiest file:\n\n${preds[0]?.file}\n→ ${preds[0]?.bug_probability.toFixed(1)}% bug probability\n→ ${preds[0]?.loc||'?'} lines`;
+    if(ql.includes('top 5'))return'Top 5 risky files:\n\n'+preds.slice(0,5).map((p,i)=>`${i+1}. ${shortName(p.file)}\n   ${p.bug_probability.toFixed(1)}% · ${riskLabel(p.bug_probability)}`).join('\n\n');
+    if(ql.includes('how many'))return`📊 Breakdown:\n• 🔴 High (≥60%): ${high.length}\n• 🟠 Medium (30-59%): ${mid.length}\n• 🟢 Low (<30%): ${low.length}\n• Total: ${preds.length} files`;
+    if(ql.includes('fix')||ql.includes('first'))return`Action plan:\n\n1️⃣ Start with ${high.length} high-risk files\n2️⃣ Click any file → AI Review\n3️⃣ Get: diagnosis + fix + tests`;
+    if(ql.includes('summar')||ql.includes('health')){const avg=preds.reduce((s,p)=>s+p.bug_probability,0)/preds.length;return`📋 Repo Health:\n\n${avg>=60?'⚠️ Needs urgent attention':avg>=30?'🟡 Moderate risk':'✅ Looks clean'}\n\n• Files: ${preds.length}\n• Avg score: ${avg.toFixed(1)}%\n• High risk: ${high.length}`;}
+    const avg=preds.reduce((s,p)=>s+p.bug_probability,0)/preds.length;return`Scanned ${preds.length} files · Avg ${avg.toFixed(1)}% · ${high.length} high-risk\n\nTry: "which file is riskiest?" or "what should I fix first?"`;
+  };
+  const send=async(t)=>{
+    const q=(t||input).trim();if(!q||loading)return;
+    setInput('');setMsgs(m=>[...m,{role:'user',text:q}]);setLoading(true);
+    await new Promise(r=>setTimeout(r,500+Math.random()*400));
+    setMsgs(m=>[...m,{role:'ai',text:answer(q)}]);setLoading(false);
+  };
+  return(
+    <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
+      <div style={{padding:'13px 16px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <div style={{width:7,height:7,borderRadius:'50%',background:'var(--green)',boxShadow:'0 0 8px var(--green)',animation:'pulse 2s ease-in-out infinite'}}/>
+          <span style={{fontFamily:'var(--mono)',fontWeight:600,fontSize:13}}>AI Assistant</span>
+          {repoData&&<span style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--muted)',background:'var(--s3)',border:'1px solid var(--border)',padding:'2px 6px',borderRadius:3}}>{preds.length} files</span>}
+        </div>
+        <button onClick={onClose} style={{background:'none',border:'none',color:'var(--muted)',fontSize:17,lineHeight:1}}>✕</button>
+      </div>
+      <div style={{flex:1,overflowY:'auto',padding:'12px 14px',display:'flex',flexDirection:'column',gap:8}}>
+        {msgs.map((m,i)=>(
+          <div key={i} style={{display:'flex',justifyContent:m.role==='user'?'flex-end':'flex-start',animation:'fadeUp .2s ease'}}>
+            {m.role==='ai'&&<div style={{width:22,height:22,borderRadius:'50%',background:'var(--s4)',border:'1px solid var(--border2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,flexShrink:0,marginRight:6,marginTop:2}}>🤖</div>}
+            <div style={{maxWidth:'85%',padding:'10px 13px',borderRadius:m.role==='user'?'10px 10px 2px 10px':'2px 10px 10px 10px',background:m.role==='user'?'var(--cyan)1e':'var(--s3)',border:`1px solid ${m.role==='user'?'var(--cyan)30':'var(--border)'}`,fontSize:12,lineHeight:1.75,color:'var(--text)'}}>
+              <pre style={{fontSize:12,fontFamily:'var(--sans)',whiteSpace:'pre-wrap',lineHeight:1.75}}>{m.text}</pre>
+            </div>
+          </div>
+        ))}
+        {loading&&<div style={{display:'flex',alignItems:'center',gap:8}}><div style={{width:22,height:22,borderRadius:'50%',background:'var(--s4)',border:'1px solid var(--border2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,flexShrink:0}}>🤖</div><div style={{padding:'10px 14px',borderRadius:'2px 10px 10px 10px',background:'var(--s3)',border:'1px solid var(--border)',display:'flex',gap:4,alignItems:'center'}}>{[0,1,2].map(i=><div key={i} style={{width:5,height:5,borderRadius:'50%',background:'var(--cyan)',animation:`pulse 1s ${i*.18}s ease-in-out infinite`}}/>)}</div></div>}
+        <div ref={bottomRef}/>
+      </div>
+      <div style={{padding:'8px 12px',borderTop:'1px solid var(--border)',display:'flex',flexWrap:'wrap',gap:4,flexShrink:0}}>
+        {qa.slice(0,4).map(q=><button key={q} onClick={()=>send(q)} disabled={loading} style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--cyan)',background:'var(--cyan)0d',border:'1px solid var(--cyan)22',padding:'3px 8px',borderRadius:4,opacity:loading?.5:1}}>{q}</button>)}
+      </div>
+      <div style={{padding:'10px 12px',borderTop:'1px solid var(--border)',display:'flex',gap:8,flexShrink:0}}>
+        <textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}} placeholder="Ask about bugs, files, scores… (Enter)" rows={2}
+          style={{flex:1,background:'var(--s2)',border:'1px solid var(--border2)',borderRadius:7,padding:'8px 10px',color:'var(--text)',fontSize:12,outline:'none',resize:'none',lineHeight:1.5}}
+          onFocus={e=>e.target.style.borderColor='var(--cyan)'} onBlur={e=>e.target.style.borderColor='var(--border2)'}/>
+        <button onClick={()=>send()} disabled={!input.trim()||loading} style={{background:input.trim()&&!loading?'var(--cyan)':'var(--s3)',color:input.trim()&&!loading?'#000':'var(--muted)',border:'none',borderRadius:7,width:38,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+          {loading?<Spinner size={14}/>:<span style={{fontSize:18,fontWeight:600}}>↑</span>}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════
+   DASHBOARD
+══════════════════════════════════════════════════════════════════ */
+const Dashboard = ({user, onLogout}) => {
+  const [url,setUrl]=useState('');
+  const [loading,setLoading]=useState(false);
+  const [data,setData]=useState(null);
+  const [error,setError]=useState('');
+  const [selected,setSelected]=useState(null);
+  const [filter,setFilter]=useState('all');
+  const [chartTab,setChartTab]=useState('bars');
+  const [chatOpen,setChatOpen]=useState(false);
+
+  const analyze=async()=>{
+    if(!url.trim())return;
+    setLoading(true);setError('');setData(null);setSelected(null);
+    try{
+      const r=await authFetch(`${API}/analyze`,{method:'POST',body:JSON.stringify({url:url.trim()})});
+      if(r.status===401){onLogout();return;}
+      if(!r.ok)throw new Error(`Server error ${r.status}`);
+      const j=await r.json();
+      if(j.status==='error')throw new Error(j.message);
+      setData(j);
+    }catch(e){setError(e.message);}
+    finally{setLoading(false);}
+  };
+
+  const preds=useMemo(()=>data?.predictions?[...data.predictions].sort((a,b)=>b.bug_probability-a.bug_probability):[],[data]);
+  const high=useMemo(()=>preds.filter(p=>p.bug_probability>=60),[preds]);
+  const mid=useMemo(()=>preds.filter(p=>p.bug_probability>=30&&p.bug_probability<60),[preds]);
+  const low=useMemo(()=>preds.filter(p=>p.bug_probability<30),[preds]);
+  const avg=preds.length?(preds.reduce((s,p)=>s+p.bug_probability,0)/preds.length):0;
+  const totalLOC=preds.reduce((s,p)=>s+(p.loc||0),0);
+  const filtered=preds.filter(p=>filter==='high'?p.bug_probability>=60:filter==='medium'?(p.bug_probability>=30&&p.bug_probability<60):filter==='low'?p.bug_probability<30:true);
+  const selData=selected?{...selected,code:data?.raw_files?.[selected.file]||''}:null;
+  const CTABS=[{k:'bars',l:'Bar Chart'},{k:'scatter',l:'LOC vs Risk'},{k:'heatmap',l:'Directory'}];
+
+  return(
+    <div style={{minHeight:'100vh',background:'var(--bg)',display:'flex',flexDirection:'column'}}>
+
+      {/* ── Navbar ── */}
+      <nav style={{height:50,borderBottom:'1px solid var(--border)',padding:'0 24px',display:'flex',alignItems:'center',justifyContent:'space-between',position:'sticky',top:0,background:'rgba(7,8,11,.95)',backdropFilter:'blur(8px)',zIndex:100,flexShrink:0}}>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <div style={{width:7,height:7,borderRadius:'50%',background:'var(--cyan)',boxShadow:'0 0 7px var(--cyan)',animation:'pulse 2s ease-in-out infinite'}}/>
+          <span style={{fontFamily:'var(--mono)',fontWeight:600,fontSize:14,letterSpacing:'.05em'}}>BugRadar<span style={{color:'var(--cyan)'}}>.</span>AI</span>
+          {data&&<span style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--muted)',marginLeft:8}}><span style={{color:'var(--cyan)',fontWeight:600}}>{preds.length}</span> files scanned</span>}
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <Tag>CodeBERT</Tag><Tag>PyTorch</Tag><Tag color="purple">LangGraph</Tag>
+          <button onClick={()=>setChatOpen(o=>!o)} style={{display:'flex',alignItems:'center',gap:6,background:chatOpen?'var(--green)18':'var(--s2)',border:`1px solid ${chatOpen?'var(--green)40':'var(--border2)'}`,borderRadius:6,padding:'5px 14px',color:chatOpen?'var(--green)':'var(--muted)',fontFamily:'var(--mono)',fontSize:11,transition:'all .15s'}}>
+            <div style={{width:6,height:6,borderRadius:'50%',background:chatOpen?'var(--green)':'var(--muted)',animation:chatOpen?'pulse 2s ease-in-out infinite':'none'}}/>
+            {chatOpen?'CLOSE CHAT':'AI CHAT'}
+          </button>
+          {/* User menu */}
+          <div style={{display:'flex',alignItems:'center',gap:8,paddingLeft:8,borderLeft:'1px solid var(--border)'}}>
+            <div style={{width:28,height:28,borderRadius:'50%',background:'linear-gradient(135deg,var(--cyan)44,var(--purple)44)',border:'1px solid var(--border2)',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'var(--mono)',fontSize:11,fontWeight:600,color:'var(--text)',flexShrink:0}}>
+              {user.name.charAt(0).toUpperCase()}
+            </div>
+            <span style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--muted)',maxWidth:80,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user.name}</span>
+            <button onClick={onLogout} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'3px 8px',color:'var(--muted)',fontFamily:'var(--mono)',fontSize:9,letterSpacing:'.06em',transition:'all .15s'}}
+              onMouseEnter={e=>{e.target.style.borderColor='var(--red)';e.target.style.color='var(--red)';}}
+              onMouseLeave={e=>{e.target.style.borderColor='var(--border)';e.target.style.color='var(--muted)';}}>
+              LOGOUT
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      <div style={{display:'flex',flex:1,overflow:'hidden'}}>
+        <div style={{flex:1,overflowY:'auto',padding:'36px 28px'}}>
+
+          {/* Hero */}
+          <div className="fade-up" style={{textAlign:'center',marginBottom:36}}>
+            <div style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--cyan)',letterSpacing:'.18em',marginBottom:12,opacity:.7}}>CODEBERT · PYTORCH · LANGGRAPH · FASTAPI</div>
+            <h1 style={{fontSize:'clamp(1.9rem,4vw,3.2rem)',fontWeight:600,lineHeight:1.12,letterSpacing:'-.03em',marginBottom:12}}>
+              Find bugs before<br/><span style={{color:'var(--cyan)'}}>they find you.</span>
+            </h1>
+            <p style={{color:'var(--muted)',fontSize:14,maxWidth:490,margin:'0 auto',lineHeight:1.8}}>
+              Welcome back, <strong style={{color:'var(--text)'}}>{user.name}</strong>. Scan any public Python repo to get started.
+            </p>
+          </div>
+
+          {/* Input */}
+          <div className="fade-up-1" style={{maxWidth:640,margin:'0 auto 36px',display:'flex',gap:8}}>
+            <input value={url} onChange={e=>setUrl(e.target.value)} onKeyDown={e=>e.key==='Enter'&&!loading&&analyze()}
+              placeholder="https://github.com/username/repository"
+              style={{flex:1,background:'var(--s1)',border:'1px solid var(--border2)',borderRadius:8,padding:'11px 15px',color:'var(--text)',fontSize:13,fontFamily:'var(--mono)',outline:'none',transition:'border .2s'}}
+              onFocus={e=>e.target.style.borderColor='var(--cyan)'} onBlur={e=>e.target.style.borderColor='var(--border2)'}/>
+            <button onClick={analyze} disabled={loading||!url.trim()} style={{background:loading||!url.trim()?'var(--s3)':'var(--cyan)',color:loading||!url.trim()?'var(--muted)':'#000',border:'none',borderRadius:8,padding:'11px 22px',fontFamily:'var(--mono)',fontWeight:600,fontSize:12,letterSpacing:'.06em',display:'flex',alignItems:'center',gap:8,transition:'all .2s',flexShrink:0}}>
+              {loading?<><Spinner/><span>SCANNING</span></>:'SCAN REPO'}
+            </button>
+          </div>
+
+          {error&&<div style={{maxWidth:640,margin:'-22px auto 22px',padding:'11px 15px',background:'var(--red)0f',border:'1px solid var(--red)28',borderRadius:8,color:'var(--red)',fontFamily:'var(--mono)',fontSize:12}}>✕ {error}</div>}
+
+          {data&&(
+            <div className="fade-up">
+              {/* Stats */}
+              <div style={{display:'flex',gap:10,marginBottom:22,flexWrap:'wrap'}}>
+                <StatCard label="Total Scanned" value={preds.length} color="var(--cyan)"  sub="Python files"         icon="📁" delay={0}/>
+                <StatCard label="High Risk"      value={high.length} color="var(--red)"   sub="≥ 60% probability"   icon="🔴" delay={.05}/>
+                <StatCard label="Medium Risk"    value={mid.length}  color="var(--amber)" sub="30–59% probability"  icon="🟠" delay={.1}/>
+                <StatCard label="Low Risk"       value={low.length}  color="var(--green)" sub="< 30% probability"   icon="🟢" delay={.15}/>
+                <StatCard label="Avg Bug Score"  value={`${avg.toFixed(1)}%`} color="var(--purple)" sub={`${totalLOC.toLocaleString()} total LOC`} icon="📊" isStr delay={.2}/>
+              </div>
+
+              {/* Charts + right column */}
+              <div style={{display:'grid',gridTemplateColumns:'1fr 260px',gap:16,marginBottom:18,alignItems:'start'}}>
+                <div style={{background:'var(--s1)',border:'1px solid var(--border)',borderRadius:10,overflow:'hidden'}}>
+                  <div style={{padding:'10px 16px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                    <div style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--muted)',letterSpacing:'.12em'}}>ANALYSIS CHARTS</div>
+                    <div style={{display:'flex',gap:4}}>
+                      {CTABS.map(t=><button key={t.k} onClick={()=>setChartTab(t.k)} style={{fontFamily:'var(--mono)',fontSize:9,padding:'3px 9px',borderRadius:3,border:`1px solid ${chartTab===t.k?'var(--cyan)':'var(--border)'}`,background:chartTab===t.k?'var(--cyan)18':'transparent',color:chartTab===t.k?'var(--cyan)':'var(--muted)',transition:'all .12s'}}>{t.l}</button>)}
+                    </div>
+                  </div>
+                  <div style={{padding:'16px 18px',overflowX:'auto'}}>
+                    {chartTab==='bars'&&<HBarChart predictions={preds}/>}
+                    {chartTab==='scatter'&&(preds.some(p=>p.loc)?<ScatterChart predictions={preds}/>:<div style={{color:'var(--muted)',fontFamily:'var(--mono)',fontSize:11,padding:'40px 0',textAlign:'center'}}>LOC data not available.</div>)}
+                    {chartTab==='heatmap'&&<HeatMap predictions={preds}/>}
+                  </div>
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                  <div style={{background:'var(--s1)',border:'1px solid var(--border)',borderRadius:10,padding:'14px 16px'}}>
+                    <div style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--muted)',letterSpacing:'.12em',marginBottom:14}}>RISK DISTRIBUTION</div>
+                    <Donut high={high.length} mid={mid.length} low={low.length} total={preds.length}/>
+                  </div>
+                  <div style={{background:'var(--s1)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px'}}>
+                    <div style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--muted)',letterSpacing:'.12em',marginBottom:10}}>TOP RISKY FILES</div>
+                    {preds.slice(0,3).map((p,i)=>(
+                      <div key={p.file} onClick={()=>setSelected(p)} style={{display:'flex',alignItems:'center',gap:7,padding:'5px 0',borderBottom:i<2?'1px solid var(--border)':'none',cursor:'pointer'}}>
+                        <span style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--dim)',minWidth:14}}>#{i+1}</span>
+                        <span style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--text)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{shortName(p.file)}</span>
+                        <span style={{fontFamily:'var(--mono)',fontSize:10,color:riskColor(p.bug_probability),fontWeight:600,flexShrink:0}}>{p.bug_probability.toFixed(0)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                  {selected&&(
+                    <div style={{background:'var(--s1)',border:`1px solid ${riskColor(selected.bug_probability)}35`,borderRadius:10,padding:'12px 14px',animation:'fadeUp .2s ease'}}>
+                      <div style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--muted)',letterSpacing:'.1em',marginBottom:7}}>SELECTED FILE</div>
+                      <div style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--text)',marginBottom:8,wordBreak:'break-all',lineHeight:1.5}}>{selected.file}</div>
+                      <div style={{fontFamily:'var(--mono)',fontSize:10,color:riskColor(selected.bug_probability),marginBottom:10}}>{selected.bug_probability.toFixed(1)}% · {riskLabel(selected.bug_probability)}</div>
+                      <button onClick={()=>setSelected({...selected,openReview:true})} style={{width:'100%',background:'var(--cyan)',color:'#000',border:'none',borderRadius:5,padding:'7px',fontFamily:'var(--mono)',fontWeight:600,fontSize:10,letterSpacing:'.05em'}}>AI REVIEW →</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* File list */}
+              <div style={{background:'var(--s1)',border:'1px solid var(--border)',borderRadius:10,overflow:'hidden'}}>
+                <div style={{padding:'9px 14px',borderBottom:'1px solid var(--border)',display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                  <span style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--muted)',letterSpacing:'.1em',marginRight:4}}>FILTER:</span>
+                  {[['all',preds.length],['high',high.length],['medium',mid.length],['low',low.length]].map(([f,c])=>(
+                    <button key={f} onClick={()=>setFilter(f)} style={{fontFamily:'var(--mono)',fontSize:9,padding:'3px 9px',borderRadius:3,border:`1px solid ${filter===f?'var(--cyan)':'var(--border)'}`,background:filter===f?'var(--cyan)15':'transparent',color:filter===f?'var(--cyan)':'var(--muted)',transition:'all .12s',textTransform:'uppercase',letterSpacing:'.06em'}}>{f} ({c})</button>
+                  ))}
+                  <span style={{marginLeft:'auto',fontFamily:'var(--mono)',fontSize:9,color:'var(--dim)'}}>{filtered.length} / {preds.length} files</span>
+                </div>
+                <div style={{maxHeight:420,overflowY:'auto'}}>
+                  {filtered.length===0?<div style={{padding:28,textAlign:'center',color:'var(--muted)',fontFamily:'var(--mono)',fontSize:12}}>No files in this category.</div>
+                    :filtered.map(p=><FileRow key={p.file} file={p.file} prob={p.bug_probability} loc={p.loc} selected={selected?.file===p.file} onClick={()=>setSelected(p)}/>)}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!data&&!loading&&!error&&(
+            <div className="fade-up-2" style={{textAlign:'center',padding:'28px 0'}}>
+              <div style={{color:'var(--muted)',fontSize:13,marginBottom:8}}>Enter a GitHub URL and press <kbd style={{fontFamily:'var(--mono)',fontSize:11,background:'var(--s2)',border:'1px solid var(--border)',padding:'2px 6px',borderRadius:4}}>Enter</kbd></div>
+              <div style={{fontSize:12,fontFamily:'var(--mono)',color:'var(--cyan)',opacity:.7,cursor:'pointer'}} onClick={()=>setChatOpen(true)}>or open AI CHAT to ask questions →</div>
+            </div>
+          )}
+        </div>
+
+        {/* Chat sidebar */}
+        {chatOpen&&(
+          <div style={{width:360,flexShrink:0,borderLeft:'1px solid var(--border2)',background:'var(--s1)',display:'flex',flexDirection:'column',animation:'slideIn .22s ease',overflow:'hidden',height:'calc(100vh - 50px)',position:'sticky',top:50}}>
+            <ChatSidebar repoData={data} onClose={()=>setChatOpen(false)}/>
+          </div>
+        )}
+      </div>
+
+      {selected?.openReview&&selData&&(
+        <ReviewModal file={selData.file} code={selData.code} prob={selData.bug_probability}
+          onClose={()=>setSelected({...selected,openReview:false})}/>
+      )}
+    </div>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════
+   ROOT — handles auth state + token persistence
+══════════════════════════════════════════════════════════════════ */
+const Root = () => {
+  const [user, setUser]       = useState(null);   // null = not loaded yet
+  const [checking, setChecking] = useState(true);  // verifying stored token
+
+  /* On first load: if a token exists in localStorage, verify it with the backend */
+  useEffect(() => {
+    const verify = async () => {
+      const token = loadToken();
+      if (!token) { setChecking(false); return; }
+      try {
+        const r = await authFetch(`${API}/auth/me`);
+        if (r.ok) {
+          const d = await r.json();
+          setUser(d.user);
+        } else {
+          clearToken();   // token expired or invalid — clear it
+        }
+      } catch {
+        // Backend is offline — still clear token so user sees login
+        clearToken();
+      } finally {
+        setChecking(false);
+      }
+    };
+    verify();
+  }, []);
+
+  const handleAuth   = (u) => setUser(u);
+  const handleLogout = () => { clearToken(); setUser(null); };
+
+  if (checking) {
+    return (
+      <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}}>
+        <Spinner size={28}/>
+        <div style={{fontFamily:'var(--mono)',fontSize:11,color:'var(--muted)',letterSpacing:'.1em'}}>LOADING…</div>
+      </div>
+    );
+  }
+
+  if (!user) return <AuthPage onAuth={handleAuth}/>;
+  return <Dashboard user={user} onLogout={handleLogout}/>;
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
+</script>
+</body>
+</html>
