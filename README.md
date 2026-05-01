@@ -187,8 +187,4 @@ Or just double-click `index.html` in Finder.
 **Jaish Kumar**
 Final Year Project — B.Tech Computer Science
 
----
 
-## 📄 License
-
-MIT License — feel free to use this for learning and reference.
