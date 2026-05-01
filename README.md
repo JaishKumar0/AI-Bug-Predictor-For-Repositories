@@ -84,107 +84,14 @@ GitHub Repo URL
 ```
 project/
 ├── backend/
-│   ├── main.py           # FastAPI app — routes, CORS, JWT protection
-│   ├── auth.py           # Signup, login, token creation/verification
-│   ├── ml_model.py       # BugPredictor: CodeBERT + BugClassifier
-│   ├── github_utils.py   # Clone repo, extract .py files
-│   └── llm_retriwer.py   # LangGraph 5-node code review agent
+│   ├── main.py          # FastAPI routes + auth
+│   ├── ml_model.py      # CodeBERT + PyTorch inference
+│   ├── github_utils.py  # Git clone + file extraction
+│   ├── llm_retriwer.py  # LangGraph 4-step agent
+│   └── auth.py          # JWT signup/login
 ├── frontend/
 │   └── react/
-│       └── index.html    # Single-file React app (no build step)
-├── models/
-│   ├── best_bug_model.pth  # Trained PyTorch weights
-│   └── scaler.pkl          # Fitted StandardScaler
-├── requirements.txt
-├── .gitignore
-└── README.md
+│       └── index.html   # Full React app (no build needed)
+├── models/              # Trained weights (git-ignored)
+└── requirements.txt
 ```
-
----
-
-## 🚀 Getting Started
-
-### 1. Clone the repository
-```bash
-git clone https://github.com/YOUR_USERNAME/bugradar-ai.git
-cd bugradar-ai
-```
-
-### 2. Install dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Set up environment variables
-Create a `.env` file in the project root:
-```
-HUGGINGFACEHUB_API_TOKEN=hf_your_token_here
-JWT_SECRET_KEY=your-secret-key-here
-```
-Get your HuggingFace token from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
-
-### 4. Start the backend
-```bash
-uvicorn backend.main:app --reload
-```
-
-### 5. Open the frontend
-```bash
-open frontend/react/index.html
-```
-Or just double-click `index.html` in Finder.
-
----
-
-## 🔌 API Endpoints
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| POST | `/auth/signup` | ❌ | Register a new user |
-| POST | `/auth/login` | ❌ | Login, receive JWT token |
-| GET | `/auth/me` | ✅ | Get current user from token |
-| POST | `/analyze` | ✅ | Scan a GitHub repo |
-| POST | `/review` | ✅ | Run LangGraph agent on a file |
-| GET | `/health` | ❌ | Health check |
-
----
-
-## 🧠 ML Model Details
-
-| Component | Detail |
-|-----------|--------|
-| Base model | `microsoft/codebert-base` (RoBERTa) |
-| Embedding | 768-dim CLS token |
-| Extra features | LOC, avg cyclomatic complexity (radon) |
-| Total input | 770 features |
-| Architecture | Linear(770→512) → BN → ReLU → Dropout(0.3) → Linear(512→256) → BN → ReLU → Dropout(0.3) → Linear(256→1) |
-| Output | Sigmoid → bug probability (0–100%) |
-| Loss | BCEWithLogitsLoss |
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | React 18, Vanilla JS (no build step) |
-| Backend | FastAPI, Uvicorn |
-| ML | PyTorch, Transformers (CodeBERT), scikit-learn, Radon |
-| LLM Agent | LangGraph, LangChain, HuggingFace Inference API |
-| Auth | JWT (PyJWT), bcrypt |
-| Data | Git clone via GitPython |
-
----
-
-## 📸 Screenshots
-
-> *(Add screenshots of your login page, dashboard, chart views, and AI review modal)*
-
----
-
-## 👨‍💻 Author
-
-**Jaish Kumar**
-Final Year Project — B.Tech Computer Science
-
-
