@@ -195,16 +195,6 @@ streamlit run app.py
 
 ---
 
-## 📡 API Endpoints
-
-| Method | Endpoint | Description | Auth |
-|--------|----------|-------------|------|
-| `POST` | `/auth/signup` | Register new user | ❌ |
-| `POST` | `/auth/login` | Login, returns JWT | ❌ |
-| `GET` | `/auth/me` | Get current user | ✅ |
-| `POST` | `/analyze` | Scan a GitHub repo | ✅ |
-| `POST` | `/review` | LangGraph AI review of a file | ✅ |
-| `GET` | `/health` | Health check | ❌ |
 
 ### Example: Analyze a repo
 ```bash
@@ -249,8 +239,3 @@ Hypothesize → Critique → Fix → Tests → Report
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-jaish--kumar-blue?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/jaish-kumar)
 [![GitHub](https://img.shields.io/badge/GitHub-JaishKumar0-black?style=flat-square&logo=github)](https://github.com/JaishKumar0)
 
----
-
-## 📄 License
-
-MIT License — feel free to use, modify, and distribute.
