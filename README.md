@@ -8,7 +8,7 @@
 ![React](https://img.shields.io/badge/React-18-cyan?style=flat-square&logo=react)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Agent-purple?style=flat-square)
 ![CodeBERT](https://img.shields.io/badge/CodeBERT-microsoft-orange?style=flat-square)
-![License](https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square)
+
 
 ---
 
