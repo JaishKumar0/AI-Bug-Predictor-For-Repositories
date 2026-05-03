@@ -222,16 +222,6 @@ Hypothesize → Critique → Fix → Tests → Report
 
 ---
 
-## ⚠️ Limitations
-
-- Only supports **public** GitHub repositories
-- Optimized for **Python** files only
-- LangGraph agent requires a valid **HuggingFace API token**
-- Large repos (5000+ files) may be slow — model runs on CPU by default
-- Model weights (`best_bug_model.pth`) are not included — train your own or contact the author
-
----
-
 ## 👤 Author
 
 **Jaish Kumar** — Final Year B.Tech Computer Science, Bundelkhand University
